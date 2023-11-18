@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	reqKey   = "_dgateReq"
-	noLogKey = "_dgateNoLog"
+	reqKey   = "_refReq"
+	noLogKey = "_refNoLog"
 )
 
 type ginReq struct {

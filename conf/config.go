@@ -16,14 +16,23 @@ type Config struct {
 	Timeout       int64
 	Log           *log.Config
 	Port          int
-	AllowOrigins  []string // 跨域配置
+	AllowOrigins  []string
 	SlackWebHooks map[string]string
 	Telegram      *TelegramConfig
+	Email         *EmailConfig
 }
 
 type TelegramConfig struct {
 	BotToken  string
 	ChatGroup map[string]int64
+}
+
+type EmailConfig struct {
+	Region       string
+	Sender       string
+	AccessID     string
+	AccessSecret string
+	Receiver     map[string][]string
 }
 
 func init() {

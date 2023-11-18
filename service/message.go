@@ -1,7 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ses"
+	"github.com/aws/aws-sdk-go-v2/service/ses/types"
 	"net/http"
 	"ref-message-hub/common/ecode"
 	"ref-message-hub/common/log"
@@ -9,15 +13,48 @@ import (
 	"ref-message-hub/common/referror"
 	"ref-message-hub/conf"
 	"ref-message-hub/model"
+	"sync"
 )
 
-func (s *Service) SendMessage(param *model.MessageParam) (err error) {
-	if err = s.sendTelegram(param); err != nil {
-		return
-	}
-	if err = s.sendSlackMessage(param); err != nil {
-		return
-	}
+func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, email bool) {
+	var (
+		tgError    error
+		slackError error
+		emailError error
+		wg         sync.WaitGroup
+	)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if tgError = s.sendTelegram(param); tgError != nil {
+			tg = false
+		} else {
+			tg = true
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if slackError = s.sendSlackMessage(param); slackError != nil {
+			slack = false
+		} else {
+			slack = true
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if emailError = s.sendEmail(param); emailError != nil {
+			email = false
+		} else {
+			email = true
+		}
+	}()
+
+	wg.Wait()
 	return
 }
 
@@ -37,24 +74,31 @@ func (s *Service) sendTelegram(param *model.MessageParam) (err error) {
 		log.Error("sendTelegram error: %v", err)
 		return
 	}
-	if response.Ok {
+	if !response.Ok {
+		err = &referror.Error{Code: ecode.TelegramError, Message: "failed send to telegram"}
 		return
 	}
-	err = &referror.Error{Code: ecode.TelegramError, Message: "failed send to telegram"}
+	log.Info("sendTelegram success")
 	return
 }
 
 func (s *Service) sendSlackMessage(param *model.MessageParam) (err error) {
+	var (
+		title = "Alert"
+	)
 	slackWebHook, ok := conf.Conf.SlackWebHooks[param.Slack]
 	if !ok {
 		return
+	}
+	if len(param.Title) > 0 {
+		title = param.Title
 	}
 	var slackMessages []model.SlackMessageBlock
 	slackMessages = append(slackMessages, model.SlackMessageBlock{
 		Type: "header",
 		Text: model.SlackMessage{
 			Type: "plain_text",
-			Text: "反馈",
+			Text: title,
 		},
 	})
 	slackMessages = append(slackMessages, model.SlackMessageBlock{
@@ -76,5 +120,47 @@ func (s *Service) sendSlackMessage(param *model.MessageParam) (err error) {
 		err = &referror.Error{Code: ecode.SlackError, Message: response.HttpBodyText}
 		return
 	}
+	log.Info("sendSlackMessage success")
+	return
+}
+
+func (s *Service) sendEmail(param *model.MessageParam) (err error) {
+	var (
+		title = "Alert"
+	)
+	if !param.Email {
+		return
+	}
+	if len(param.Title) > 0 {
+		title = param.Title
+	}
+	toAddress, ok := conf.Conf.Email.Receiver[param.Level]
+	if !ok {
+		return
+	}
+	input := &ses.SendEmailInput{
+		Destination: &types.Destination{
+			ToAddresses: toAddress,
+		},
+		Message: &types.Message{
+			Body: &types.Body{
+				Text: &types.Content{
+					Data: aws.String(param.Content),
+				},
+			},
+			Subject: &types.Content{
+				Data: aws.String(title),
+			},
+		},
+		Source: aws.String(conf.Conf.Email.Sender),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+	_, err = s.email.Client.SendEmail(ctx, input)
+	if err != nil {
+		log.Error("sendEmail client.SendEmail error: %v", err)
+		return
+	}
+	log.Info("sendEmail success")
 	return
 }

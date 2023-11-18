@@ -46,7 +46,7 @@ func Validate(obj interface{}) (err error) {
 		if fieldStruct := reflectType.Field(i); ast.IsExported(fieldStruct.Name) {
 			switch fieldStruct.Type.Kind() {
 			case reflect.String:
-				str := fieldStruct.Tag.Get("degate")
+				str := fieldStruct.Tag.Get("ref")
 				if len(str) > 0 {
 					tags := strings.Split(str, ",")
 					for _, value := range tags {
@@ -104,7 +104,7 @@ func traverseValue(reflectV reflect.Value) (err error) {
 		if fieldStruct := reflectType.Field(i); ast.IsExported(fieldStruct.Name) {
 			switch fieldStruct.Type.Kind() {
 			case reflect.String:
-				str := fieldStruct.Tag.Get("degate")
+				str := fieldStruct.Tag.Get("ref")
 				if len(str) > 0 {
 					tags := strings.Split(str, ",")
 					for _, value := range tags {
@@ -199,9 +199,8 @@ func CheckTagValue(tag string, value reflect.Value, jsonName string) (err error)
 }
 
 var (
-	reApiCommon    = regexp.MustCompile(`^[0-9a-zA-Z,\s]+$`) // api 常规字符串检查, 数字+字母+,+空格
-	reWsSubscribe  = regexp.MustCompile("^[0-9a-zA-Z.@_]+$") // ws订阅检查, 数字+字母+ . + @ + _
-	reWsListenKey  = regexp.MustCompile("^[0-9a-zA-Z.-_]+$") // listen key校验
+	reApiCommon    = regexp.MustCompile(`^[0-9a-zA-Z,\s]+$`) // api , number+letter+,+space
+	reWsListenKey  = regexp.MustCompile("^[0-9a-zA-Z.-_]+$") // listen key
 	reETHAddr      = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
 	rePublicKey    = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
 	reSignatureKey = regexp.MustCompile(`^0x[0-9a-fA-F]{132,192}$`)
@@ -250,21 +249,6 @@ func CheckTagApiUrl(value string, jsonName string) (err error) {
 	}
 	if !reApiUrl.MatchString(value) {
 		err = fmt.Errorf(fmt.Sprintf("%v Error: there are illegal characters", jsonName))
-		return
-	}
-	return
-}
-
-func CheckTagReWsSubscribe(value string, jsonName string) (err error) {
-	if len(value) == 0 {
-		return
-	}
-	if len(value) > 1000 {
-		err = fmt.Errorf(fmt.Sprintf("%v Error: length exceeds limit", jsonName))
-		return
-	}
-	if !reWsSubscribe.MatchString(value) {
-		err = fmt.Errorf(fmt.Sprintf("%v Error: subscribe illegal", jsonName))
 		return
 	}
 	return

@@ -22,7 +22,9 @@ func main() {
 	log.Init(conf.Conf.Log, conf.Conf.Debug)
 	log.Info("message-hub service start")
 
-	service.Init()
+	if err := service.Init(); err != nil {
+		panic(err)
+	}
 	log.Info("message-hub service init")
 
 	http.InitHttpServer()

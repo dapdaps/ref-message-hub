@@ -1,10 +1,18 @@
 package model
 
 type MessageParam struct {
+	Title   string `json:"title"`
+	Content string `json:"content" binding:"required"`
 	TgGroup string `json:"tg_group"`
 	Slack   string `json:"slack"`
-	Email   string `json:"email"`
-	Content string `json:"content" binding:"required"`
+	Email   bool   `json:"email"`
+	Level   string `json:"level"`
+}
+
+type MessageResponse struct {
+	Telegram bool `json:"telegram"`
+	Slack    bool `json:"slack"`
+	Email    bool `json:"email"`
 }
 
 type SlackMessageBlock struct {

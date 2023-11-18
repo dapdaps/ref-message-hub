@@ -19,10 +19,10 @@ func sendMessage(c *gin.Context) {
 		http.ReturnError(c, &referror.Error{Code: ecode.RequestErr, Message: err.Error()})
 		return
 	}
-	err = service.MessageService.SendMessage(&param)
-	if err != nil {
-		http.ReturnError(c, err)
-		return
-	}
-	c.JSON(ecode.OK, http.Resp(ecode.OK, nil))
+	tg, slack, email := service.MessageService.SendMessage(&param)
+	c.JSON(ecode.OK, http.Resp(ecode.OK, model.MessageResponse{
+		Telegram: tg,
+		Slack:    slack,
+		Email:    email,
+	}))
 }
