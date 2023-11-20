@@ -12,27 +12,34 @@ var (
 )
 
 type Config struct {
-	Debug         bool
-	Timeout       int64
-	Log           *log.Config
-	Port          int
-	AllowOrigins  []string
-	SlackWebHooks map[string]string
-	Telegram      *TelegramConfig
-	Email         *EmailConfig
+	Debug        bool
+	Timeout      int64
+	Log          *log.Config
+	Port         int
+	AllowOrigins []string
+	Slack        *SlackConfig
+	Telegram     *TelegramConfig
+	Email        *EmailConfig
+	Product      map[string]map[string][]string
+	Levels       map[string]string
+}
+
+type SlackConfig struct {
+	Channel map[string]string
+	Users   map[string]string
 }
 
 type TelegramConfig struct {
-	BotToken  string
-	ChatGroup map[string]int64
+	BotToken string
+	Channel  map[string]int64
+	Users    map[string]string
 }
 
 type EmailConfig struct {
-	Region       string
-	Sender       string
-	AccessID     string
-	AccessSecret string
-	Receiver     map[string][]string
+	Sender   string
+	Password string
+	Host     string
+	Users    map[string]string
 }
 
 func init() {
@@ -45,5 +52,9 @@ func Init() (err error) {
 		log.Error("error decoding [%v]:%v", confPath, err)
 		return
 	}
+	Conf.Levels = map[string]string{}
+	Conf.Levels["critial"] = ""
+	Conf.Levels["high"] = ""
+	Conf.Levels["medium"] = ""
 	return
 }

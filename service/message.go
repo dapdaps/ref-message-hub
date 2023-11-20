@@ -1,73 +1,105 @@
 package service
 
 import (
-	"context"
+	"crypto/tls"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ses"
-	"github.com/aws/aws-sdk-go-v2/service/ses/types"
 	"net/http"
+	"net/smtp"
 	"ref-message-hub/common/ecode"
 	"ref-message-hub/common/log"
 	model2 "ref-message-hub/common/model"
 	"ref-message-hub/common/referror"
 	"ref-message-hub/conf"
 	"ref-message-hub/model"
+	"strings"
 	"sync"
 )
 
-func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, email bool) {
+func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, email bool, err error) {
 	var (
+		product    map[string][]string
+		users      []string
 		tgError    error
 		slackError error
 		emailError error
 		wg         sync.WaitGroup
 	)
+	if !param.Slack && !param.Telegram && !param.Email {
+		err = &referror.Error{Code: ecode.ParamError, Message: "must choose one among Slack, Telegram, and email"}
+		return
+	}
+	if _, ok := conf.Conf.Levels[param.Level]; !ok {
+		err = &referror.Error{Code: ecode.ParamError, Message: "illegal level"}
+		return
+	}
+	product, ok := conf.Conf.Product[param.Product]
+	if !ok {
+		err = &referror.Error{Code: ecode.ParamError, Message: "not find product"}
+		return
+	}
+	users, ok = product[param.Level]
+	if !ok {
+		err = &referror.Error{Code: ecode.ParamError, Message: "not find users"}
+		return
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if tgError = s.sendTelegram(param); tgError != nil {
-			tg = false
-		} else {
-			tg = true
-		}
-	}()
+	if param.Telegram {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tgError = s.sendTelegram(param, users); tgError != nil {
+				tg = false
+			} else {
+				tg = true
+			}
+		}()
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if slackError = s.sendSlackMessage(param); slackError != nil {
-			slack = false
-		} else {
-			slack = true
-		}
-	}()
+	if param.Slack {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if slackError = s.sendSlackMessage(param, users); slackError != nil {
+				slack = false
+			} else {
+				slack = true
+			}
+		}()
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if emailError = s.sendEmail(param); emailError != nil {
-			email = false
-		} else {
-			email = true
-		}
-	}()
+	if param.Email {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if emailError = s.sendEmail(param, users); emailError != nil {
+				email = false
+			} else {
+				email = true
+			}
+		}()
+	}
 
 	wg.Wait()
 	return
 }
 
-func (s *Service) sendTelegram(param *model.MessageParam) (err error) {
-	tgGroup, ok := conf.Conf.Telegram.ChatGroup[param.TgGroup]
+func (s *Service) sendTelegram(param *model.MessageParam, users []string) (err error) {
+	var (
+		text = ""
+	)
+	tgChannel, ok := conf.Conf.Telegram.Channel["monitor"]
 	if !ok {
 		return
 	}
+	for _, user := range users {
+		text += conf.Conf.Telegram.Users[user]
+	}
+	text += param.Content
 	response := &model.TelegramResponse{}
 	url := "https://api.telegram.org/bot%s/sendMessage"
 	request := &model.TelegramMessage{
-		ChatId: tgGroup,
-		Text:   param.Content,
+		ChatId: tgChannel,
+		Text:   text,
 	}
 	err = s.httpClient.PostJSON(fmt.Sprintf(url, conf.Conf.Telegram.BotToken), nil, request, response)
 	if err != nil {
@@ -82,17 +114,19 @@ func (s *Service) sendTelegram(param *model.MessageParam) (err error) {
 	return
 }
 
-func (s *Service) sendSlackMessage(param *model.MessageParam) (err error) {
+func (s *Service) sendSlackMessage(param *model.MessageParam, users []string) (err error) {
 	var (
-		title = "Alert"
+		title = param.Product + " alert"
+		text  = ""
 	)
-	slackWebHook, ok := conf.Conf.SlackWebHooks[param.Slack]
+	slackWebHook, ok := conf.Conf.Slack.Channel["monitor"]
 	if !ok {
 		return
 	}
-	if len(param.Title) > 0 {
-		title = param.Title
+	for _, user := range users {
+		text += "<@" + conf.Conf.Slack.Users[user] + "> "
 	}
+	text += "\n" + param.Content
 	var slackMessages []model.SlackMessageBlock
 	slackMessages = append(slackMessages, model.SlackMessageBlock{
 		Type: "header",
@@ -105,7 +139,7 @@ func (s *Service) sendSlackMessage(param *model.MessageParam) (err error) {
 		Type: "section",
 		Text: model.SlackMessage{
 			Type: "mrkdwn",
-			Text: param.Content,
+			Text: text,
 		},
 	})
 	request := map[string][]model.SlackMessageBlock{}
@@ -124,43 +158,97 @@ func (s *Service) sendSlackMessage(param *model.MessageParam) (err error) {
 	return
 }
 
-func (s *Service) sendEmail(param *model.MessageParam) (err error) {
+// smtp send email
+func (s *Service) sendEmail(param *model.MessageParam, users []string) (err error) {
 	var (
-		title = "Alert"
+		to     []string
+		client *smtp.Client
 	)
-	if !param.Email {
-		return
+	for _, user := range users {
+		to = append(to, conf.Conf.Email.Users[user])
 	}
-	if len(param.Title) > 0 {
-		title = param.Title
+	headers := make(map[string]string)
+	headers["From"] = conf.Conf.Email.Sender
+	headers["To"] = strings.Join(to, ",")
+	headers["Subject"] = param.Product + " alert"
+
+	message := ""
+	for k, v := range headers {
+		message += fmt.Sprintf("%s: %s\r\n", k, v)
 	}
-	toAddress, ok := conf.Conf.Email.Receiver[param.Level]
-	if !ok {
-		return
+	message += "\r\n" + param.Content
+
+	auth := smtp.PlainAuth("", conf.Conf.Email.Sender, conf.Conf.Email.Password, conf.Conf.Email.Host)
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         conf.Conf.Email.Host,
 	}
-	input := &ses.SendEmailInput{
-		Destination: &types.Destination{
-			ToAddresses: toAddress,
-		},
-		Message: &types.Message{
-			Body: &types.Body{
-				Text: &types.Content{
-					Data: aws.String(param.Content),
-				},
-			},
-			Subject: &types.Content{
-				Data: aws.String(title),
-			},
-		},
-		Source: aws.String(conf.Conf.Email.Sender),
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-	_, err = s.email.Client.SendEmail(ctx, input)
+	conn, err := tls.Dial("tcp", conf.Conf.Email.Host+":465", tlsConfig)
 	if err != nil {
-		log.Error("sendEmail client.SendEmail error: %v", err)
+		log.Error("sendEmail tls.Dial error: %v", err)
 		return
 	}
-	log.Info("sendEmail success")
+	client, err = smtp.NewClient(conn, conf.Conf.Email.Host)
+	if err = client.Auth(auth); err != nil {
+		log.Error("sendEmail client.Auth error: %v", err)
+		return
+	}
+	if err = client.Mail(conf.Conf.Email.Sender); err != nil {
+		log.Error("sendEmail client.Mail error: %v", err)
+		return
+	}
+	for _, address := range to {
+		if err = client.Rcpt(address); err != nil {
+			log.Error("sendEmail client.Rcpt error: %v", err)
+			return
+		}
+	}
+	w, err := client.Data()
+	if err != nil {
+		log.Error("sendEmail client.Data error: %v", err)
+		return
+	}
+	if _, err = w.Write([]byte(message)); err != nil {
+		log.Error("sendEmail Write error: %v", err)
+		return
+	}
+	if err = w.Close(); err != nil {
+		log.Error("sendEmail Close error: %v", err)
+		return
+	}
+	_ = client.Quit()
 	return
 }
+
+//ses send emial
+//func (s *Service) sendEmail(param *model.MessageParam, users []string) (err error) {
+//	//toAddress, ok := conf.Conf.Email.Users[param.Level]
+//	//if !ok {
+//	//	return
+//	//}
+//	//input := &ses.SendEmailInput{
+//	//	Destination: &types.Destination{
+//	//		ToAddresses: toAddress,
+//	//	},
+//	//	Message: &types.Message{
+//	//		Body: &types.Body{
+//	//			Text: &types.Content{
+//	//				Data: aws.String(param.Content),
+//	//			},
+//	//		},
+//	//		Subject: &types.Content{
+//	//			Data: aws.String("Alert"),
+//	//		},
+//	//	},
+//	//	Source: aws.String(conf.Conf.Email.Sender),
+//	//}
+//	//ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+//	//defer cancel()
+//	//_, err = s.email.Client.SendEmail(ctx, input)
+//	//if err != nil {
+//	//	log.Error("sendEmail client.SendEmail error: %v", err)
+//	//	return
+//	//}
+//	//log.Info("sendEmail success")
+//	return
+//}
