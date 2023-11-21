@@ -95,7 +95,7 @@ func (s *Service) sendTelegram(param *model.MessageParam, users []string, title 
 	if !ok {
 		return
 	}
-	text += title + "/n"
+	text += title + "\n"
 	for _, user := range users {
 		text += conf.Conf.Telegram.Users[user]
 	}
