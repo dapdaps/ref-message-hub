@@ -17,6 +17,7 @@ import (
 
 func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, email bool, err error) {
 	var (
+		title      = param.Title
 		product    map[string][]string
 		users      []string
 		tgError    error
@@ -42,12 +43,15 @@ func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, e
 		err = &referror.Error{Code: ecode.ParamError, Message: "not find users"}
 		return
 	}
+	if len(title) == 0 {
+		title = param.Product + " " + param.Type
+	}
 
 	if param.Telegram {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if tgError = s.sendTelegram(param, users); tgError != nil {
+			if tgError = s.sendTelegram(param, users, title); tgError != nil {
 				tg = false
 			} else {
 				tg = true
@@ -59,7 +63,7 @@ func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, e
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if slackError = s.sendSlackMessage(param, users); slackError != nil {
+			if slackError = s.sendSlackMessage(param, users, title); slackError != nil {
 				slack = false
 			} else {
 				slack = true
@@ -71,7 +75,7 @@ func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, e
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if emailError = s.sendEmail(param, users); emailError != nil {
+			if emailError = s.sendEmail(param, users, title); emailError != nil {
 				email = false
 			} else {
 				email = true
@@ -83,7 +87,7 @@ func (s *Service) SendMessage(param *model.MessageParam) (tg bool, slack bool, e
 	return
 }
 
-func (s *Service) sendTelegram(param *model.MessageParam, users []string) (err error) {
+func (s *Service) sendTelegram(param *model.MessageParam, users []string, title string) (err error) {
 	var (
 		text = ""
 	)
@@ -91,6 +95,7 @@ func (s *Service) sendTelegram(param *model.MessageParam, users []string) (err e
 	if !ok {
 		return
 	}
+	text += title + "/n"
 	for _, user := range users {
 		text += conf.Conf.Telegram.Users[user]
 	}
@@ -114,10 +119,9 @@ func (s *Service) sendTelegram(param *model.MessageParam, users []string) (err e
 	return
 }
 
-func (s *Service) sendSlackMessage(param *model.MessageParam, users []string) (err error) {
+func (s *Service) sendSlackMessage(param *model.MessageParam, users []string, title string) (err error) {
 	var (
-		title = param.Product + " alert"
-		text  = ""
+		text = ""
 	)
 	slackWebHook, ok := conf.Conf.Slack.Channel["monitor"]
 	if !ok {
@@ -159,7 +163,7 @@ func (s *Service) sendSlackMessage(param *model.MessageParam, users []string) (e
 }
 
 // smtp send email
-func (s *Service) sendEmail(param *model.MessageParam, users []string) (err error) {
+func (s *Service) sendEmail(param *model.MessageParam, users []string, title string) (err error) {
 	var (
 		to     []string
 		client *smtp.Client
@@ -170,7 +174,7 @@ func (s *Service) sendEmail(param *model.MessageParam, users []string) (err erro
 	headers := make(map[string]string)
 	headers["From"] = conf.Conf.Email.Sender
 	headers["To"] = strings.Join(to, ",")
-	headers["Subject"] = param.Product + " alert"
+	headers["Subject"] = title
 
 	message := ""
 	for k, v := range headers {

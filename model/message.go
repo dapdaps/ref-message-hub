@@ -1,6 +1,8 @@
 package model
 
 type MessageParam struct {
+	Title    string `json:"title"`
+	Type     string `json:"type" binding:"required"`
 	Product  string `json:"product" binding:"required"`
 	Content  string `json:"content" binding:"required"`
 	Level    string `json:"level" binding:"required"`
