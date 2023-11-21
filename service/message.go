@@ -99,6 +99,7 @@ func (s *Service) sendTelegram(param *model.MessageParam, users []string, title 
 	for _, user := range users {
 		text += conf.Conf.Telegram.Users[user]
 	}
+	text += "\n"
 	text += param.Content
 	response := &model.TelegramResponse{}
 	url := "https://api.telegram.org/bot%s/sendMessage"
